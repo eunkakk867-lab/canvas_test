@@ -1,7 +1,72 @@
 import tkinter as tk
-from tkinter import simpledialog, messagebox
+from tkinter import ttk, simpledialog, messagebox
 from PIL import Image, ImageDraw, ImageTk
 import os
+import random
+
+class RegisterDialog(tk.Toplevel):
+    """가격과 수량을 입력받기 위한 커스텀 대화상자"""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.transient(parent)
+        self.title("그림 등록")
+
+        self.result = None
+
+        body = tk.Frame(self)
+        self.initial_focus = self.body(body)
+        body.pack(padx=15, pady=15)
+
+        self.buttonbox()
+
+        self.grab_set()
+
+        if not self.initial_focus:
+            self.initial_focus = self
+
+        self.protocol("WM_DELETE_WINDOW", self.cancel)
+        self.geometry(f"+{parent.winfo_rootx()+50}+{parent.winfo_rooty()+50}")
+        self.initial_focus.focus_set()
+        self.wait_window(self)
+
+    def body(self, master):
+        tk.Label(master, text="가격:").grid(row=0, column=0, sticky="w", pady=2)
+        self.price_entry = tk.Entry(master)
+        self.price_entry.grid(row=0, column=1)
+
+        tk.Label(master, text="판매 수량:").grid(row=1, column=0, sticky="w", pady=2)
+        self.quantity_entry = tk.Entry(master)
+        self.quantity_entry.grid(row=1, column=1)
+        
+        return self.price_entry
+
+    def buttonbox(self):
+        box = tk.Frame(self)
+        w = tk.Button(box, text="확인", width=10, command=self.ok, default=tk.ACTIVE)
+        w.pack(side=tk.LEFT, padx=5, pady=5)
+        w = tk.Button(box, text="취소", width=10, command=self.cancel)
+        w.pack(side=tk.LEFT, padx=5, pady=5)
+        self.bind("<Return>", self.ok)
+        self.bind("<Escape>", self.cancel)
+        box.pack()
+
+    def ok(self, event=None):
+        try:
+            price = int(self.price_entry.get())
+            quantity = int(self.quantity_entry.get())
+            if price < 0 or quantity <= 0:
+                messagebox.showwarning("입력 오류", "가격은 0 이상, 수량은 1 이상이어야 합니다.", parent=self)
+                return
+            self.result = (price, quantity)
+            self.cancel()
+        except ValueError:
+            messagebox.showwarning("입력 오류", "가격과 수량은 숫자로 입력해야 합니다.", parent=self)
+
+    def cancel(self, event=None):
+        self.parent.focus_set()
+        self.destroy()
+
 
 class PixelArtVendingMachine:
     def __init__(self, root):
@@ -21,7 +86,7 @@ class PixelArtVendingMachine:
         self.current_color = "black"
 
         # --- 자판기 데이터 ---
-        self.vending_machine_items = [] # 등록된 아트 정보 (파일명, 가격) 저장
+        self.vending_machine_items = [] # 등록된 아트 정보 (파일명, 가격, 재고) 저장
         self.art_counter = 0 # 파일명 중복 방지를 위한 카운터
         self.art_dir = "arts" # 이미지를 저장할 디렉토리
         if not os.path.exists(self.art_dir):
@@ -32,10 +97,14 @@ class PixelArtVendingMachine:
         self.balance_var = tk.StringVar()
         self.balance_var.set(f"내 잔액: {self.balance:,}원")
 
-        # --- 갤러리 위젯 ---
-        self.gallery_images = [] # PhotoImage 객체 가비지 컬렉션 방지용
+        # --- 갤러리/컬렉션 위젯 ---
+        self.gallery_images = [] # 갤러리 탭용 PhotoImage 리스트
+        self.my_collection = [] # 내가 구매한 아이템 목록
+        self.collection_images = [] # 컬렉션 탭용 PhotoImage 리스트
 
         self.create_layout()
+        self.update_gallery() # 초기 갤러리 로딩
+        self.update_collection() # 초기 컬렉션 로딩
 
     def create_layout(self):
         # 1. 왼쪽 프레임 (픽셀 아트 캔버스 영역)
@@ -70,41 +139,63 @@ class PixelArtVendingMachine:
         register_btn = tk.Button(controls_frame, text="자판기에 등록하기", command=self.register_art)
         register_btn.pack(side="left", padx=5)
 
-        # 2. 오른쪽 프레임 (자판기 갤러리 영역)
-        gallery_outer_frame = tk.Frame(self.root, bd=2, relief="sunken")
-        gallery_outer_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
+        # 2. 오른쪽 프레임 (탭 인터페이스 영역)
+        right_frame = tk.Frame(self.root, bd=2, relief="sunken")
+        right_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
 
-        gallery_label = tk.Label(gallery_outer_frame, text="<< 자판기 갤러리 >>", font=("Arial", 14))
-        gallery_label.pack(pady=10)
+        # 잔액 및 충전 프레임 (탭 바깥에 위치)
+        top_info_frame = tk.Frame(right_frame)
+        top_info_frame.pack(pady=10, fill="x")
 
-        # 잔액 표시 레이블 추가
-        balance_label = tk.Label(gallery_outer_frame, textvariable=self.balance_var, font=("Arial", 12, "bold"))
-        balance_label.pack(pady=5)
+        balance_label = tk.Label(top_info_frame, textvariable=self.balance_var, font=("Arial", 12, "bold"))
+        balance_label.pack()
 
-        # 스크롤바와 캔버스를 포함할 프레임
-        gallery_content_frame = tk.Frame(gallery_outer_frame)
+        charge_frame = tk.Frame(top_info_frame)
+        charge_frame.pack()
+        self.charge_entry = tk.Entry(charge_frame, width=15)
+        self.charge_entry.pack(side="left", padx=5)
+        charge_button = tk.Button(charge_frame, text="충전하기", command=self.charge_balance)
+        charge_button.pack(side="left")
+
+        # --- 탭 생성 ---
+        notebook = ttk.Notebook(right_frame)
+        notebook.pack(fill="both", expand=True, padx=5, pady=5)
+
+        # '자판기 갤러리' 탭
+        gallery_tab = tk.Frame(notebook)
+        notebook.add(gallery_tab, text="자판기 갤러리")
+
+        # 갤러리 탭 내의 컨텐츠 프레임
+        gallery_content_frame = tk.Frame(gallery_tab)
         gallery_content_frame.pack(fill="both", expand=True)
 
-        # 스크롤바 생성
-        scrollbar = tk.Scrollbar(gallery_content_frame)
+        # 랜덤 뽑기 버튼 프레임
+        draw_frame = tk.Frame(gallery_content_frame)
+        draw_frame.pack(pady=5)
+        random_draw_button = tk.Button(draw_frame, text="랜덤 뽑기 (300원)", command=self.random_draw)
+        random_draw_button.pack()
+
+        self.scrollable_gallery_frame = self.create_scrollable_frame(gallery_content_frame)
+
+        # '내 컬렉션' 탭
+        collection_tab = tk.Frame(notebook)
+        notebook.add(collection_tab, text="내 컬렉션")
+        self.scrollable_collection_frame = self.create_scrollable_frame(collection_tab)
+
+    def create_scrollable_frame(self, parent_tab):
+        """스크롤 가능한 프레임을 생성하여 반환하는 헬퍼 함수"""
+        scrollbar = tk.Scrollbar(parent_tab)
         scrollbar.pack(side="right", fill="y")
-
-        # 갤러리 아이템을 보여줄 캔버스
-        self.gallery_canvas = tk.Canvas(gallery_content_frame, yscrollcommand=scrollbar.set)
-        self.gallery_canvas.pack(side="left", fill="both", expand=True)
-
-        # 스크롤바와 캔버스 연결
-        scrollbar.config(command=self.gallery_canvas.yview)
-
-        # 캔버스 내부에 실제 위젯들이 들어갈 프레임
-        self.scrollable_gallery_frame = tk.Frame(self.gallery_canvas)
-        self.gallery_canvas.create_window((0, 0), window=self.scrollable_gallery_frame, anchor="nw")
-
-        # 스크롤 영역 설정
-        self.scrollable_gallery_frame.bind(
+        canvas = tk.Canvas(parent_tab, yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas)
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        scrollable_frame.bind(
             "<Configure>",
-            lambda e: self.gallery_canvas.configure(scrollregion=self.gallery_canvas.bbox("all"))
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
+        return scrollable_frame
 
     def draw_grid(self):
         for i in range(self.grid_size + 1):
@@ -123,14 +214,11 @@ class PixelArtVendingMachine:
         if 0 <= event.x < self.canvas_width and 0 <= event.y < self.canvas_height:
             col = event.x // self.cell_size
             row = event.y // self.cell_size
-
             if self.grid_cells[row][col]:
                 self.canvas.delete(self.grid_cells[row][col])
-
             if color != "white":
                 x1, y1 = col * self.cell_size, row * self.cell_size
                 x2, y2 = x1 + self.cell_size, y1 + self.cell_size
-                
                 rect_id = self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="")
                 self.grid_cells[row][col] = rect_id
             else:
@@ -147,87 +235,174 @@ class PixelArtVendingMachine:
                     self.grid_cells[row][col] = None
 
     def register_art(self):
-        """팝업으로 가격을 입력받고 캔버스 내용을 이미지로 저장합니다."""
-        price = simpledialog.askinteger("가격 설정", "그림 가격을 입력하세요:", parent=self.root, minvalue=0)
+        dialog = RegisterDialog(self.root)
+        result = dialog.result
 
-        if price is not None: # 사용자가 '취소'를 누르지 않았을 경우
+        if result:
+            price, quantity = result
             try:
                 self.art_counter += 1
                 filename = f"art_{self.art_counter:02d}.png"
                 filepath = os.path.join(self.art_dir, filename)
-
                 image = Image.new("RGB", (self.canvas_width, self.canvas_height), "white")
                 draw = ImageDraw.Draw(image)
-
                 for row in range(self.grid_size):
                     for col in range(self.grid_size):
                         if self.grid_cells[row][col]:
                             color = self.canvas.itemcget(self.grid_cells[row][col], "fill")
-                            x1 = col * self.cell_size
-                            y1 = row * self.cell_size
-                            x2 = x1 + self.cell_size
-                            y2 = y1 + self.cell_size
+                            x1, y1 = col * self.cell_size, row * self.cell_size
+                            x2, y2 = x1 + self.cell_size, y1 + self.cell_size
                             draw.rectangle([x1, y1, x2, y2], fill=color)
-                
                 image.save(filepath)
-
-                art_info = {"filepath": filepath, "price": price}
+                art_info = {"filepath": filepath, "price": price, "stock": quantity}
                 self.vending_machine_items.append(art_info)
-                
-                messagebox.showinfo("등록 완료", f"'{filename}'으로 저장되었습니다.\n가격: {price}원")
-                
+                messagebox.showinfo("등록 완료", f"'{filename}'으로 저장되었습니다.\n가격: {price}원, 수량: {quantity}개")
                 self.update_gallery()
-
             except Exception as e:
                 messagebox.showerror("오류", f"이미지 저장 중 오류가 발생했습니다:\n{e}")
 
     def update_gallery(self):
-        """자판기 갤러리를 최신 상태로 업데이트합니다."""
-        # 기존 갤러리 내용 모두 삭제
         for widget in self.scrollable_gallery_frame.winfo_children():
             widget.destroy()
-        
         self.gallery_images.clear()
-
         for item in self.vending_machine_items:
             item_frame = tk.Frame(self.scrollable_gallery_frame, bd=1, relief="solid")
             item_frame.pack(pady=5, padx=10, fill="x")
-
-            # 이미지 로드 및 리사이즈
             img = Image.open(item["filepath"])
-            img.thumbnail((100, 100)) # 썸네일 크기 조절
+            img.thumbnail((100, 100))
             photo_img = ImageTk.PhotoImage(img)
             self.gallery_images.append(photo_img)
-
             img_label = tk.Label(item_frame, image=photo_img)
             img_label.pack(side="left", padx=5, pady=5)
-
             info_frame = tk.Frame(item_frame)
             info_frame.pack(side="left", padx=10)
-
-            price_label = tk.Label(info_frame, text=f"가격: {item['price']:,}원", font=("Arial", 12))
+            
+            price_text = f"가격: {item['price']:,}원"
+            stock_text = f"재고: {item['stock']}개"
+            price_label = tk.Label(info_frame, text=price_text, font=("Arial", 12))
             price_label.pack(anchor="w")
+            stock_label = tk.Label(info_frame, text=stock_text, font=("Arial", 10))
+            stock_label.pack(anchor="w")
 
-            buy_button = tk.Button(info_frame, text="구입", command=lambda i=item: self.buy_art(i))
+            buy_button = tk.Button(info_frame)
             buy_button.pack(anchor="w", pady=5)
+            
+            if item['stock'] <= 0:
+                buy_button.config(text="품절", state="disabled")
+            else:
+                buy_button.config(text="구입", command=lambda i=item, sl=stock_label, btn=buy_button: self.buy_art(i, sl, btn))
 
-    def buy_art(self, item):
-        """갤러리의 아이템을 구매합니다."""
+    def update_collection(self):
+        """'내 컬렉션' 탭을 업데이트합니다."""
+        for widget in self.scrollable_collection_frame.winfo_children():
+            widget.destroy()
+        self.collection_images.clear()
+        
+        for item_path, count in self.my_collection:
+            item_frame = tk.Frame(self.scrollable_collection_frame, bd=1, relief="solid")
+            item_frame.pack(pady=5, padx=10, fill="x")
+            img = Image.open(item_path)
+            img.thumbnail((100, 100))
+            photo_img = ImageTk.PhotoImage(img)
+            self.collection_images.append(photo_img)
+            img_label = tk.Label(item_frame, image=photo_img)
+            img_label.pack(side="left", padx=5, pady=5)
+            
+            info_frame = tk.Frame(item_frame)
+            info_frame.pack(side="left", padx=10)
+            
+            filename_label = tk.Label(info_frame, text=os.path.basename(item_path), font=("Arial", 10))
+            filename_label.pack(anchor="w")
+            count_label = tk.Label(info_frame, text=f"보유 수량: {count}개", font=("Arial", 10, "bold"))
+            count_label.pack(anchor="w")
+
+    def buy_art(self, item, stock_label, button):
         price = item["price"]
         if self.balance >= price:
-            # 잔액 차감 및 표시 업데이트
             self.balance -= price
             self.balance_var.set(f"내 잔액: {self.balance:,}원")
             
-            # 데이터 목록에서 아이템 제거
-            self.vending_machine_items.remove(item)
-            
-            # 갤러리 갱신
-            self.update_gallery()
-            
+            item["stock"] -= 1
+            stock_label.config(text=f"재고: {item['stock']}개")
+
+            # 내 컬렉션에 추가 또는 수량 증가
+            found = False
+            for i, (path, count) in enumerate(self.my_collection):
+                if path == item["filepath"]:
+                    self.my_collection[i] = (path, count + 1)
+                    found = True
+                    break
+            if not found:
+                self.my_collection.append((item["filepath"], 1))
+
+            if item["stock"] <= 0:
+                button.config(text="품절", state="disabled")
+
             messagebox.showinfo("구매 완료", "그림을 성공적으로 구매했습니다!")
+            self.update_collection() # 구매 성공 시 컬렉션 탭 업데이트
         else:
             messagebox.showwarning("잔액 부족", "잔액이 부족하여 그림을 구매할 수 없습니다.")
+
+    def charge_balance(self):
+        try:
+            amount_str = self.charge_entry.get()
+            if not amount_str:
+                return
+
+            amount = int(amount_str)
+            if amount > 0:
+                self.balance += amount
+                self.balance_var.set(f"내 잔액: {self.balance:,}원")
+                self.charge_entry.delete(0, 'end')
+            else:
+                messagebox.showwarning("입력 오류", "0보다 큰 금액을 입력해주세요.")
+                self.charge_entry.delete(0, 'end')
+        except ValueError:
+            messagebox.showerror("입력 오류", "숫자만 입력해주세요.")
+            self.charge_entry.delete(0, 'end')
+
+    def random_draw(self):
+        """300원으로 무작위 아이템을 뽑습니다."""
+        draw_price = 300
+        
+        # 재고가 있는 아이템 목록 필터링
+        available_items = [item for item in self.vending_machine_items if item['stock'] > 0]
+
+        if not available_items:
+            messagebox.showinfo("품절", "뽑을 수 있는 그림이 없습니다.")
+            return
+
+        if self.balance < draw_price:
+            messagebox.showwarning("잔액 부족", f"뽑기를 위한 잔액이 부족합니다. ({draw_price}원 필요)")
+            return
+
+        # 잔액 차감
+        self.balance -= draw_price
+        self.balance_var.set(f"내 잔액: {self.balance:,}원")
+
+        # 랜덤 아이템 선택
+        drawn_item = random.choice(available_items)
+        
+        # 재고 차감
+        drawn_item["stock"] -= 1
+
+        # 내 컬렉션에 추가 또는 수량 증가
+        found = False
+        for i, (path, count) in enumerate(self.my_collection):
+            if path == drawn_item["filepath"]:
+                self.my_collection[i] = (path, count + 1)
+                found = True
+                break
+        if not found:
+            self.my_collection.append((drawn_item["filepath"], 1))
+
+        # 갤러리 및 컬렉션 UI 업데이트
+        self.update_gallery()
+        self.update_collection()
+
+        # 성공 메시지 표시
+        filename = os.path.basename(drawn_item["filepath"])
+        messagebox.showinfo("획득!", f"축하합니다! '{filename}' 그림을 획득했습니다!")
 
 
 if __name__ == "__main__":
