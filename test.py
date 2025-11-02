@@ -14,6 +14,9 @@ class PixelArtVendingMachine:
         
         # 각 셀의 사각형 ID를 저장하기 위한 2D 리스트
         self.grid_cells = [[None for _ in range(self.grid_size)] for _ in range(self.grid_size)]
+        
+        # --- 그리기 도구 설정 ---
+        self.current_color = "black" # 현재 선택된 색상 (기본값: 검은색)
 
         self.create_layout()
 
@@ -31,10 +34,25 @@ class PixelArtVendingMachine:
         self.draw_grid()
 
         # 마우스 이벤트 바인딩
-        self.canvas.bind("<B1-Motion>", self.paint_cell) # 마우스 왼쪽 버튼을 누른 채로 움직일 때
-        self.canvas.bind("<Button-1>", self.paint_cell)   # 마우스 왼쪽 버튼을 클릭할 때
-        self.canvas.bind("<B3-Motion>", self.erase_cell) # 마우스 오른쪽 버튼을 누른 채로 움직일 때
-        self.canvas.bind("<Button-3>", self.erase_cell)   # 마우스 오른쪽 버튼을 클릭할 때
+        self.canvas.bind("<B1-Motion>", self.paint_cell)
+        self.canvas.bind("<Button-1>", self.paint_cell)
+        self.canvas.bind("<B3-Motion>", self.erase_cell)
+        self.canvas.bind("<Button-3>", self.erase_cell)
+
+        # --- 컨트롤 프레임 (색상 팔레트, 버튼) ---
+        controls_frame = tk.Frame(canvas_frame)
+        controls_frame.pack(pady=10)
+
+        # 색상 팔레트 버튼 생성
+        colors = ["black", "red", "blue", "green"]
+        for color in colors:
+            # 각 버튼이 자신의 색상 값을 가지도록 lambda 함수 사용
+            color_btn = tk.Button(controls_frame, bg=color, width=4, command=lambda c=color: self.select_color(c))
+            color_btn.pack(side="left", padx=5)
+
+        # 모두 지우기 버튼 생성
+        clear_btn = tk.Button(controls_frame, text="모두 지우기", command=self.clear_canvas)
+        clear_btn.pack(side="left", padx=20)
 
         # 2. 오른쪽 프레임 (자판기 갤러리 영역)
         gallery_frame = tk.Frame(self.root, bd=2, relief="sunken", padx=10, pady=10)
@@ -54,8 +72,8 @@ class PixelArtVendingMachine:
             self.canvas.create_line(0, y, self.canvas_width, y, fill="lightgrey")
 
     def paint_cell(self, event):
-        """마우스 위치의 셀을 검은색으로 칠합니다."""
-        self.change_cell_color(event, "black")
+        """마우스 위치의 셀을 현재 선택된 색상으로 칠합니다."""
+        self.change_cell_color(event, self.current_color)
 
     def erase_cell(self, event):
         """마우스 위치의 셀을 흰색으로 되돌립니다 (지우개)."""
@@ -68,21 +86,29 @@ class PixelArtVendingMachine:
             col = event.x // self.cell_size
             row = event.y // self.cell_size
 
-            # 기존에 해당 셀에 그려진 사각형이 있다면 삭제
             if self.grid_cells[row][col]:
                 self.canvas.delete(self.grid_cells[row][col])
 
-            # 새로운 색상으로 사각형을 그리고, ID를 저장
-            # 흰색이 아닐 경우에만 사각형을 그려서 배경이 보이도록 함
             if color != "white":
                 x1, y1 = col * self.cell_size, row * self.cell_size
                 x2, y2 = x1 + self.cell_size, y1 + self.cell_size
                 
-                # 격자선이 가려지지 않도록 1픽셀 안쪽으로 그림
                 rect_id = self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="")
                 self.grid_cells[row][col] = rect_id
             else:
                 self.grid_cells[row][col] = None
+    
+    def select_color(self, new_color):
+        """팔레트에서 선택된 색상으로 현재 색상을 변경합니다."""
+        self.current_color = new_color
+
+    def clear_canvas(self):
+        """캔버스의 모든 그림을 지웁니다."""
+        for row in range(self.grid_size):
+            for col in range(self.grid_size):
+                if self.grid_cells[row][col]:
+                    self.canvas.delete(self.grid_cells[row][col])
+                    self.grid_cells[row][col] = None
 
 
 if __name__ == "__main__":
