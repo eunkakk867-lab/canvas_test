@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import simpledialog, messagebox
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageTk
 import os
 
 class PixelArtVendingMachine:
@@ -26,6 +26,9 @@ class PixelArtVendingMachine:
         self.art_dir = "arts" # 이미지를 저장할 디렉토리
         if not os.path.exists(self.art_dir):
             os.makedirs(self.art_dir)
+        
+        # --- 갤러리 위젯 ---
+        self.gallery_images = [] # PhotoImage 객체 가비지 컬렉션 방지용
 
         self.create_layout()
 
@@ -63,11 +66,36 @@ class PixelArtVendingMachine:
         register_btn.pack(side="left", padx=5)
 
         # 2. 오른쪽 프레임 (자판기 갤러리 영역)
-        gallery_frame = tk.Frame(self.root, bd=2, relief="sunken", padx=10, pady=10)
-        gallery_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
+        gallery_outer_frame = tk.Frame(self.root, bd=2, relief="sunken")
+        gallery_outer_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
 
-        gallery_label = tk.Label(gallery_frame, text="<< 자판기 갤러리 >>", font=("Arial", 14))
-        gallery_label.pack(pady=20)
+        gallery_label = tk.Label(gallery_outer_frame, text="<< 자판기 갤러리 >>", font=("Arial", 14))
+        gallery_label.pack(pady=10)
+
+        # 스크롤바와 캔버스를 포함할 프레임
+        gallery_content_frame = tk.Frame(gallery_outer_frame)
+        gallery_content_frame.pack(fill="both", expand=True)
+
+        # 스크롤바 생성
+        scrollbar = tk.Scrollbar(gallery_content_frame)
+        scrollbar.pack(side="right", fill="y")
+
+        # 갤러리 아이템을 보여줄 캔버스
+        self.gallery_canvas = tk.Canvas(gallery_content_frame, yscrollcommand=scrollbar.set)
+        self.gallery_canvas.pack(side="left", fill="both", expand=True)
+
+        # 스크롤바와 캔버스 연결
+        scrollbar.config(command=self.gallery_canvas.yview)
+
+        # 캔버스 내부에 실제 위젯들이 들어갈 프레임
+        self.scrollable_gallery_frame = tk.Frame(self.gallery_canvas)
+        self.gallery_canvas.create_window((0, 0), window=self.scrollable_gallery_frame, anchor="nw")
+
+        # 스크롤 영역 설정
+        self.scrollable_gallery_frame.bind(
+            "<Configure>",
+            lambda e: self.gallery_canvas.configure(scrollregion=self.gallery_canvas.bbox("all"))
+        )
 
     def draw_grid(self):
         for i in range(self.grid_size + 1):
@@ -119,11 +147,9 @@ class PixelArtVendingMachine:
                 filename = f"art_{self.art_counter:02d}.png"
                 filepath = os.path.join(self.art_dir, filename)
 
-                # 1. Pillow를 사용하여 새 이미지 생성
                 image = Image.new("RGB", (self.canvas_width, self.canvas_height), "white")
                 draw = ImageDraw.Draw(image)
 
-                # 2. 캔버스의 픽셀 데이터를 이미지에 그리기
                 for row in range(self.grid_size):
                     for col in range(self.grid_size):
                         if self.grid_cells[row][col]:
@@ -134,18 +160,51 @@ class PixelArtVendingMachine:
                             y2 = y1 + self.cell_size
                             draw.rectangle([x1, y1, x2, y2], fill=color)
                 
-                # 3. 이미지 파일로 저장
                 image.save(filepath)
 
-                # 4. 아트 정보 저장
                 art_info = {"filepath": filepath, "price": price}
                 self.vending_machine_items.append(art_info)
                 
                 messagebox.showinfo("등록 완료", f"'{filename}'으로 저장되었습니다.\n가격: {price}원")
-                print(f"등록된 아트: {self.vending_machine_items}") # 콘솔에 저장된 정보 출력
+                
+                # 갤러리 업데이트
+                self.update_gallery()
 
             except Exception as e:
                 messagebox.showerror("오류", f"이미지 저장 중 오류가 발생했습니다:\n{e}")
+
+    def update_gallery(self):
+        """자판기 갤러리를 최신 상태로 업데이트합니다."""
+        # 기존 갤러리 내용 모두 삭제
+        for widget in self.scrollable_gallery_frame.winfo_children():
+            widget.destroy()
+        
+        self.gallery_images.clear() # 이미지 리스트 초기화
+
+        # vending_machine_items에 있는 각 아이템을 갤러리에 추가
+        for item in self.vending_machine_items:
+            # 각 아이템을 담을 프레임
+            item_frame = tk.Frame(self.scrollable_gallery_frame, bd=1, relief="solid")
+            item_frame.pack(pady=5, padx=10, fill="x")
+
+            # 이미지 로드 및 리사이즈
+            img = Image.open(item["filepath"])
+            img.thumbnail((100, 100)) # 썸네일 크기 조절
+            photo_img = ImageTk.PhotoImage(img)
+            self.gallery_images.append(photo_img) # 가비지 컬렉션 방지
+
+            # 위젯 생성
+            img_label = tk.Label(item_frame, image=photo_img)
+            img_label.pack(side="left", padx=5, pady=5)
+
+            info_frame = tk.Frame(item_frame)
+            info_frame.pack(side="left", padx=10)
+
+            price_label = tk.Label(info_frame, text=f"가격: {item['price']}원", font=("Arial", 12))
+            price_label.pack(anchor="w")
+
+            buy_button = tk.Button(info_frame, text="구입")
+            buy_button.pack(anchor="w", pady=5)
 
 
 if __name__ == "__main__":
