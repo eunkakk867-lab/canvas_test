@@ -1,4 +1,7 @@
 import tkinter as tk
+from tkinter import simpledialog, messagebox
+from PIL import Image, ImageDraw
+import os
 
 class PixelArtVendingMachine:
     def __init__(self, root):
@@ -7,16 +10,22 @@ class PixelArtVendingMachine:
         self.root.geometry("1000x700")
 
         # --- 캔버스 설정 ---
-        self.grid_size = 20  # 20x20 격자
-        self.cell_size = 25  # 각 셀의 크기 (픽셀)
+        self.grid_size = 20
+        self.cell_size = 25
         self.canvas_width = self.grid_size * self.cell_size
         self.canvas_height = self.grid_size * self.cell_size
         
-        # 각 셀의 사각형 ID를 저장하기 위한 2D 리스트
         self.grid_cells = [[None for _ in range(self.grid_size)] for _ in range(self.grid_size)]
         
         # --- 그리기 도구 설정 ---
-        self.current_color = "black" # 현재 선택된 색상 (기본값: 검은색)
+        self.current_color = "black"
+
+        # --- 자판기 데이터 ---
+        self.vending_machine_items = [] # 등록된 아트 정보 (파일명, 가격) 저장
+        self.art_counter = 0 # 파일명 중복 방지를 위한 카운터
+        self.art_dir = "arts" # 이미지를 저장할 디렉토리
+        if not os.path.exists(self.art_dir):
+            os.makedirs(self.art_dir)
 
         self.create_layout()
 
@@ -28,12 +37,10 @@ class PixelArtVendingMachine:
         canvas_label = tk.Label(canvas_frame, text="<< 픽셀 아트를 그릴 격자 캔버스 >>", font=("Arial", 14))
         canvas_label.pack(pady=10)
 
-        # --- 픽셀 아트 캔버스 생성 ---
         self.canvas = tk.Canvas(canvas_frame, width=self.canvas_width, height=self.canvas_height, bg="white", highlightthickness=0)
         self.canvas.pack()
         self.draw_grid()
 
-        # 마우스 이벤트 바인딩
         self.canvas.bind("<B1-Motion>", self.paint_cell)
         self.canvas.bind("<Button-1>", self.paint_cell)
         self.canvas.bind("<B3-Motion>", self.erase_cell)
@@ -43,16 +50,17 @@ class PixelArtVendingMachine:
         controls_frame = tk.Frame(canvas_frame)
         controls_frame.pack(pady=10)
 
-        # 색상 팔레트 버튼 생성
         colors = ["black", "red", "blue", "green"]
         for color in colors:
-            # 각 버튼이 자신의 색상 값을 가지도록 lambda 함수 사용
             color_btn = tk.Button(controls_frame, bg=color, width=4, command=lambda c=color: self.select_color(c))
             color_btn.pack(side="left", padx=5)
 
-        # 모두 지우기 버튼 생성
         clear_btn = tk.Button(controls_frame, text="모두 지우기", command=self.clear_canvas)
         clear_btn.pack(side="left", padx=20)
+
+        # '자판기에 등록하기' 버튼 추가
+        register_btn = tk.Button(controls_frame, text="자판기에 등록하기", command=self.register_art)
+        register_btn.pack(side="left", padx=5)
 
         # 2. 오른쪽 프레임 (자판기 갤러리 영역)
         gallery_frame = tk.Frame(self.root, bd=2, relief="sunken", padx=10, pady=10)
@@ -62,26 +70,19 @@ class PixelArtVendingMachine:
         gallery_label.pack(pady=20)
 
     def draw_grid(self):
-        """캔버스에 20x20 격자를 그립니다."""
         for i in range(self.grid_size + 1):
-            # 수직선
             x = i * self.cell_size
             self.canvas.create_line(x, 0, x, self.canvas_height, fill="lightgrey")
-            # 수평선
             y = i * self.cell_size
             self.canvas.create_line(0, y, self.canvas_width, y, fill="lightgrey")
 
     def paint_cell(self, event):
-        """마우스 위치의 셀을 현재 선택된 색상으로 칠합니다."""
         self.change_cell_color(event, self.current_color)
 
     def erase_cell(self, event):
-        """마우스 위치의 셀을 흰색으로 되돌립니다 (지우개)."""
         self.change_cell_color(event, "white")
 
     def change_cell_color(self, event, color):
-        """지정된 좌표의 셀 색상을 변경합니다."""
-        # 이벤트 좌표가 캔버스 범위 내에 있는지 확인
         if 0 <= event.x < self.canvas_width and 0 <= event.y < self.canvas_height:
             col = event.x // self.cell_size
             row = event.y // self.cell_size
@@ -99,16 +100,52 @@ class PixelArtVendingMachine:
                 self.grid_cells[row][col] = None
     
     def select_color(self, new_color):
-        """팔레트에서 선택된 색상으로 현재 색상을 변경합니다."""
         self.current_color = new_color
 
     def clear_canvas(self):
-        """캔버스의 모든 그림을 지웁니다."""
         for row in range(self.grid_size):
             for col in range(self.grid_size):
                 if self.grid_cells[row][col]:
                     self.canvas.delete(self.grid_cells[row][col])
                     self.grid_cells[row][col] = None
+
+    def register_art(self):
+        """팝업으로 가격을 입력받고 캔버스 내용을 이미지로 저장합니다."""
+        price = simpledialog.askinteger("가격 설정", "그림 가격을 입력하세요:", parent=self.root, minvalue=0)
+
+        if price is not None: # 사용자가 '취소'를 누르지 않았을 경우
+            try:
+                self.art_counter += 1
+                filename = f"art_{self.art_counter:02d}.png"
+                filepath = os.path.join(self.art_dir, filename)
+
+                # 1. Pillow를 사용하여 새 이미지 생성
+                image = Image.new("RGB", (self.canvas_width, self.canvas_height), "white")
+                draw = ImageDraw.Draw(image)
+
+                # 2. 캔버스의 픽셀 데이터를 이미지에 그리기
+                for row in range(self.grid_size):
+                    for col in range(self.grid_size):
+                        if self.grid_cells[row][col]:
+                            color = self.canvas.itemcget(self.grid_cells[row][col], "fill")
+                            x1 = col * self.cell_size
+                            y1 = row * self.cell_size
+                            x2 = x1 + self.cell_size
+                            y2 = y1 + self.cell_size
+                            draw.rectangle([x1, y1, x2, y2], fill=color)
+                
+                # 3. 이미지 파일로 저장
+                image.save(filepath)
+
+                # 4. 아트 정보 저장
+                art_info = {"filepath": filepath, "price": price}
+                self.vending_machine_items.append(art_info)
+                
+                messagebox.showinfo("등록 완료", f"'{filename}'으로 저장되었습니다.\n가격: {price}원")
+                print(f"등록된 아트: {self.vending_machine_items}") # 콘솔에 저장된 정보 출력
+
+            except Exception as e:
+                messagebox.showerror("오류", f"이미지 저장 중 오류가 발생했습니다:\n{e}")
 
 
 if __name__ == "__main__":
