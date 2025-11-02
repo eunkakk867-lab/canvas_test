@@ -27,6 +27,11 @@ class PixelArtVendingMachine:
         if not os.path.exists(self.art_dir):
             os.makedirs(self.art_dir)
         
+        # --- 사용자 잔액 ---
+        self.balance = 10000
+        self.balance_var = tk.StringVar()
+        self.balance_var.set(f"내 잔액: {self.balance:,}원")
+
         # --- 갤러리 위젯 ---
         self.gallery_images = [] # PhotoImage 객체 가비지 컬렉션 방지용
 
@@ -71,6 +76,10 @@ class PixelArtVendingMachine:
 
         gallery_label = tk.Label(gallery_outer_frame, text="<< 자판기 갤러리 >>", font=("Arial", 14))
         gallery_label.pack(pady=10)
+
+        # 잔액 표시 레이블 추가
+        balance_label = tk.Label(gallery_outer_frame, textvariable=self.balance_var, font=("Arial", 12, "bold"))
+        balance_label.pack(pady=5)
 
         # 스크롤바와 캔버스를 포함할 프레임
         gallery_content_frame = tk.Frame(gallery_outer_frame)
@@ -167,7 +176,6 @@ class PixelArtVendingMachine:
                 
                 messagebox.showinfo("등록 완료", f"'{filename}'으로 저장되었습니다.\n가격: {price}원")
                 
-                # 갤러리 업데이트
                 self.update_gallery()
 
             except Exception as e:
@@ -179,11 +187,9 @@ class PixelArtVendingMachine:
         for widget in self.scrollable_gallery_frame.winfo_children():
             widget.destroy()
         
-        self.gallery_images.clear() # 이미지 리스트 초기화
+        self.gallery_images.clear()
 
-        # vending_machine_items에 있는 각 아이템을 갤러리에 추가
         for item in self.vending_machine_items:
-            # 각 아이템을 담을 프레임
             item_frame = tk.Frame(self.scrollable_gallery_frame, bd=1, relief="solid")
             item_frame.pack(pady=5, padx=10, fill="x")
 
@@ -191,20 +197,37 @@ class PixelArtVendingMachine:
             img = Image.open(item["filepath"])
             img.thumbnail((100, 100)) # 썸네일 크기 조절
             photo_img = ImageTk.PhotoImage(img)
-            self.gallery_images.append(photo_img) # 가비지 컬렉션 방지
+            self.gallery_images.append(photo_img)
 
-            # 위젯 생성
             img_label = tk.Label(item_frame, image=photo_img)
             img_label.pack(side="left", padx=5, pady=5)
 
             info_frame = tk.Frame(item_frame)
             info_frame.pack(side="left", padx=10)
 
-            price_label = tk.Label(info_frame, text=f"가격: {item['price']}원", font=("Arial", 12))
+            price_label = tk.Label(info_frame, text=f"가격: {item['price']:,}원", font=("Arial", 12))
             price_label.pack(anchor="w")
 
-            buy_button = tk.Button(info_frame, text="구입")
+            buy_button = tk.Button(info_frame, text="구입", command=lambda i=item: self.buy_art(i))
             buy_button.pack(anchor="w", pady=5)
+
+    def buy_art(self, item):
+        """갤러리의 아이템을 구매합니다."""
+        price = item["price"]
+        if self.balance >= price:
+            # 잔액 차감 및 표시 업데이트
+            self.balance -= price
+            self.balance_var.set(f"내 잔액: {self.balance:,}원")
+            
+            # 데이터 목록에서 아이템 제거
+            self.vending_machine_items.remove(item)
+            
+            # 갤러리 갱신
+            self.update_gallery()
+            
+            messagebox.showinfo("구매 완료", "그림을 성공적으로 구매했습니다!")
+        else:
+            messagebox.showwarning("잔액 부족", "잔액이 부족하여 그림을 구매할 수 없습니다.")
 
 
 if __name__ == "__main__":
