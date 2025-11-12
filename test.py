@@ -39,6 +39,10 @@ class RegisterDialog(tk.Toplevel):
         self.quantity_entry = tk.Entry(master)
         self.quantity_entry.grid(row=1, column=1)
         
+        tk.Label(master, text="파일 이름:").grid(row=2, column=0, sticky="w", pady=2)
+        self.filename_entry = tk.Entry(master)
+        self.filename_entry.grid(row=2, column=1)
+
         return self.price_entry
 
     def buttonbox(self):
@@ -55,10 +59,17 @@ class RegisterDialog(tk.Toplevel):
         try:
             price = int(self.price_entry.get())
             quantity = int(self.quantity_entry.get())
+            filename = self.filename_entry.get().strip()
+
             if price < 0 or quantity <= 0:
                 messagebox.showwarning("입력 오류", "가격은 0 이상, 수량은 1 이상이어야 합니다.", parent=self)
                 return
-            self.result = (price, quantity)
+            
+            if not filename:
+                messagebox.showwarning("입력 오류", "파일 이름을 입력해야 합니다.", parent=self)
+                return
+
+            self.result = (price, quantity, filename)
             self.cancel()
         except ValueError:
             messagebox.showwarning("입력 오류", "가격과 수량은 숫자로 입력해야 합니다.", parent=self)
@@ -76,10 +87,17 @@ class PaintShopDialog(tk.Toplevel):
         self.transient(parent.root)
         self.title("물감 구입")
 
-        self.random_colors = self.generate_random_colors(3)
-        self.selected_color = tk.StringVar()
-        self.color_buttons = []
+        # 지정된 색상 목록에서 3개를 랜덤으로 선택
+        color_pool = ["orange", "yellow", "skyblue", "pink", "purple", "white"]
+        # 기존 팔레트에 없는 색상만 필터링
+        existing_colors = [btn.cget('bg') for btn in self.parent_app.palette_frame.winfo_children()]
+        new_color_pool = [c for c in color_pool if c not in existing_colors]
+        
+        # 선택할 색상이 3개 미만이면 있는 만큼만, 없으면 빈 리스트
+        self.random_colors = random.sample(new_color_pool, min(len(new_color_pool), 3))
 
+        self.selected_color = tk.StringVar()
+        
         body = tk.Frame(self)
         tk.Label(body, text="구입할 색상 하나를 선택하세요.").pack(pady=10)
         
@@ -87,20 +105,22 @@ class PaintShopDialog(tk.Toplevel):
         button_frame.pack(pady=5)
 
         for color in self.random_colors:
-            rb = tk.Radiobutton(
-                button_frame, 
-                text=color, 
-                variable=self.selected_color, 
-                value=color,
-                indicatoron=0, # 라디오 버튼의 원 모양을 숨깁니다.
-                width=10,
-                bg=color,
-                selectcolor=color, # 선택되었을 때 배경색
-                command=self.on_color_select
-            )
+            # Radiobutton 텍스트를 비워서 색상만 보이게 함
+            rb = tk.Radiobutton(button_frame, 
+                                text="", 
+                                variable=self.selected_color, 
+                                value=color,
+                                indicatoron=0,
+                                width=10,
+                                bg=color,
+                                selectcolor=color,
+                                command=self.on_color_select)
             rb.pack(side="left", padx=5)
 
         body.pack(padx=15, pady=15)
+
+        if not self.random_colors:
+            tk.Label(body, text="추가할 수 있는 새 물감이 없습니다.").pack(pady=5)
 
         self.add_button = tk.Button(self, text="팔레트에 추가", command=self.add_color_to_palette, state="disabled")
         self.add_button.pack(pady=10)
@@ -109,10 +129,6 @@ class PaintShopDialog(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.geometry(f"+{parent.root.winfo_rootx()+100}+{parent.root.winfo_rooty()+100}")
         self.wait_window(self)
-
-    def generate_random_colors(self, count):
-        """지정된 개수만큼 랜덤 hex 색상 코드를 생성합니다."""
-        return [f"#{random.randint(0, 0xFFFFFF):06x}" for _ in range(count)]
 
     def on_color_select(self):
         """색상이 선택되면 '추가' 버튼을 활성화합니다."""
@@ -159,12 +175,19 @@ class PixelArtVendingMachine:
         self.paper_count = 0
         self.paper_count_var = tk.StringVar()
         self.paper_count_var.set(f"남은 종이: {self.paper_count}장")
-        self.no_paper_warning_shown = False # 종이 부족 경고를 한 번만 표시하기 위한 플래그
 
         # --- 사용자 잔액 ---
         self.balance = 10000
         self.balance_var = tk.StringVar()
         self.balance_var.set(f"내 잔액: {self.balance:,}원")
+
+        # --- 영업 상태 ---
+        self.is_business_open = True
+        self.status_var = tk.StringVar()
+        self.status_var.set("현재 상태: 영업중")
+
+        # --- UI 위젯 저장 ---
+        self.background_widgets = [] # 배경색 변경 대상 위젯 리스트
 
         # --- 갤러리/컬렉션 위젯 ---
         self.gallery_images = [] # 갤러리 탭용 PhotoImage 리스트
@@ -183,79 +206,95 @@ class PixelArtVendingMachine:
         # '영업' 메뉴 생성
         business_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="영업", menu=business_menu)
-        business_menu.add_command(label="영업중")
-        business_menu.add_command(label="영업 중지")
+        business_menu.add_command(label="영업중", command=self.start_business)
+        business_menu.add_command(label="영업 중지", command=self.stop_business)
 
         # '상점' 메뉴 생성
         shop_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="상점", menu=shop_menu)
         shop_menu.add_command(label="종이 추가", command=self.add_paper)
         shop_menu.add_command(label="물감 구입", command=self.open_paint_shop)
-
+    
     def create_layout(self):
-        # 1. 왼쪽 프레임 (픽셀 아트 캔버스 영역)
-        canvas_frame = tk.Frame(self.root, bd=2, relief="sunken", padx=10, pady=10)
-        canvas_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+        # 최상단 프레임 (상태 라벨)
+        self.top_frame = tk.Frame(self.root)
+        self.top_frame.pack(side="top", fill="x", padx=10, pady=(5, 0))
 
-        canvas_label = tk.Label(canvas_frame, text="<< 픽셀 아트를 그릴 격자 캔버스 >>", font=("Arial", 14))
+        self.status_label = tk.Label(self.top_frame, textvariable=self.status_var, font=("Arial", 12, "bold"), fg="green")
+        self.status_label.pack()
+
+        # 메인 컨텐츠 프레임
+        self.main_frame = tk.Frame(self.root)
+        self.main_frame.pack(fill="both", expand=True)
+
+        # 배경색 변경 대상 위젯 추가
+        self.background_widgets.extend([self.root, self.top_frame, self.status_label, self.main_frame])
+
+        # 1. 왼쪽 프레임 (픽셀 아트 캔버스 영역)
+        self.canvas_frame = tk.Frame(self.main_frame, bd=2, relief="sunken", padx=10, pady=10)
+        self.canvas_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+
+        canvas_label = tk.Label(self.canvas_frame, text="<< 픽셀 아트를 그릴 격자 캔버스 >>", font=("Arial", 14))
         canvas_label.pack(pady=10)
 
-        self.canvas = tk.Canvas(canvas_frame, width=self.canvas_width, height=self.canvas_height, bg="white", highlightthickness=0)
+        self.canvas = tk.Canvas(self.canvas_frame, width=self.canvas_width, height=self.canvas_height, bg="white", highlightthickness=0)
         self.canvas.pack()
         self.draw_grid()
 
         self.canvas.bind("<B1-Motion>", self.paint_cell)
-        self.canvas.bind("<Button-1>", self.paint_cell)
+        self.canvas.bind("<ButtonPress-1>", self.handle_canvas_press)
         self.canvas.bind("<B3-Motion>", self.erase_cell)
-        self.canvas.bind("<Button-3>", self.erase_cell)
+        self.canvas.bind("<ButtonPress-3>", self.handle_canvas_press)
 
         # --- 컨트롤 프레임 (색상 팔레트, 버튼) ---
-        controls_frame = tk.Frame(canvas_frame)
-        controls_frame.pack(pady=10)
+        self.controls_frame = tk.Frame(self.canvas_frame)
+        self.controls_frame.pack(pady=10)
         
-        self.palette_frame = tk.Frame(controls_frame) # 색상 버튼을 담을 프레임
+        self.palette_frame = tk.Frame(self.controls_frame) # 색상 버튼을 담을 프레임
         self.palette_frame.pack(side="left")
 
         initial_colors = ["black", "red", "blue", "green"]
         self.add_new_colors(initial_colors) # 초기 색상 팔레트 생성
 
-        clear_btn = tk.Button(controls_frame, text="모두 지우기", command=self.clear_canvas)
-        clear_btn.pack(side="left", padx=20)
+        self.clear_btn = tk.Button(self.controls_frame, text="모두 지우기", command=self.clear_canvas)
+        self.clear_btn.pack(side="left", padx=20)
 
         # '자판기에 등록하기' 버튼 추가
-        register_btn = tk.Button(controls_frame, text="자판기에 등록하기", command=self.register_art)
-        register_btn.pack(side="left", padx=5)
+        self.register_btn = tk.Button(self.controls_frame, text="자판기에 등록하기", command=self.register_art)
+        self.register_btn.pack(side="left", padx=5)
 
         # 남은 종이 라벨 추가
-        paper_label = tk.Label(controls_frame, textvariable=self.paper_count_var, font=("Arial", 10))
+        paper_label = tk.Label(self.controls_frame, textvariable=self.paper_count_var, font=("Arial", 10))
         paper_label.pack(side="left", padx=20)
 
         # 2. 오른쪽 프레임 (탭 인터페이스 영역)
-        right_frame = tk.Frame(self.root, bd=2, relief="sunken")
-        right_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
+        self.right_frame = tk.Frame(self.main_frame, bd=2, relief="sunken")
+        self.right_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
 
         # 잔액 및 충전 프레임 (탭 바깥에 위치)
-        top_info_frame = tk.Frame(right_frame)
-        top_info_frame.pack(pady=10, fill="x")
+        self.top_info_frame = tk.Frame(self.right_frame)
+        self.top_info_frame.pack(pady=10, fill="x")
 
-        balance_label = tk.Label(top_info_frame, textvariable=self.balance_var, font=("Arial", 12, "bold"))
+        balance_label = tk.Label(self.top_info_frame, textvariable=self.balance_var, font=("Arial", 12, "bold"))
         balance_label.pack()
 
-        charge_frame = tk.Frame(top_info_frame)
-        charge_frame.pack()
-        self.charge_entry = tk.Entry(charge_frame, width=15)
+        self.charge_frame = tk.Frame(self.top_info_frame)
+        self.charge_frame.pack()
+        self.charge_entry = tk.Entry(self.charge_frame, width=15)
         self.charge_entry.pack(side="left", padx=5)
-        charge_button = tk.Button(charge_frame, text="충전하기", command=self.charge_balance)
-        charge_button.pack(side="left")
+        self.charge_button = tk.Button(self.charge_frame, text="충전하기", command=self.charge_balance)
+        self.charge_button.pack(side="left")
+
+        self.background_widgets.extend([self.canvas_frame, canvas_label, self.controls_frame, self.right_frame, self.top_info_frame, balance_label, self.charge_frame, paper_label])
 
         # --- 탭 생성 ---
-        notebook = ttk.Notebook(right_frame)
+        notebook = ttk.Notebook(self.right_frame)
         notebook.pack(fill="both", expand=True, padx=5, pady=5)
 
         # '자판기 갤러리' 탭
         gallery_tab = tk.Frame(notebook)
-        notebook.add(gallery_tab, text="자판기 갤러리")
-
+        notebook.add(gallery_tab, text="자판기 갤러리")        
+        
         # 갤러리 탭 내의 컨텐츠 프레임
         gallery_content_frame = tk.Frame(gallery_tab)
         gallery_content_frame.pack(fill="both", expand=True)
@@ -263,14 +302,16 @@ class PixelArtVendingMachine:
         # 랜덤 뽑기 버튼 프레임
         draw_frame = tk.Frame(gallery_content_frame)
         draw_frame.pack(pady=5)
-        random_draw_button = tk.Button(draw_frame, text="랜덤 뽑기 (300원)", command=self.random_draw)
-        random_draw_button.pack()
+        self.random_draw_button = tk.Button(draw_frame, text="랜덤 뽑기 (300원)", command=self.random_draw)
+        self.random_draw_button.pack()
 
         self.scrollable_gallery_frame = self.create_scrollable_frame(gallery_content_frame)
 
         # '내 컬렉션' 탭
         collection_tab = tk.Frame(notebook)
         notebook.add(collection_tab, text="내 컬렉션")
+
+        self.background_widgets.extend([gallery_tab, gallery_content_frame, draw_frame, collection_tab])
         self.scrollable_collection_frame = self.create_scrollable_frame(collection_tab)
 
     def create_scrollable_frame(self, parent_tab):
@@ -296,19 +337,18 @@ class PixelArtVendingMachine:
             self.canvas.create_line(0, y, self.canvas_width, y, fill="lightgrey")
 
     def paint_cell(self, event):
+        # 종이가 없으면 그리기 동작을 막습니다.
+        if self.paper_count < 1:
+            return
         self.change_cell_color(event, self.current_color)
 
     def erase_cell(self, event):
+        # 종이가 없으면 지우기 동작을 막습니다.
+        if self.paper_count < 1:
+            return
         self.change_cell_color(event, "white")
 
     def change_cell_color(self, event, color):
-        # 종이가 없으면 그리기를 막습니다.
-        if self.paper_count < 1:
-            if not self.no_paper_warning_shown:
-                messagebox.showwarning("종이 부족", "종이가 없어 그림을 그릴 수 없습니다.\n상점에서 종이를 추가해주세요.", parent=self.root)
-                self.no_paper_warning_shown = True # 경고를 표시했음을 기록
-            return
-
         # 캔버스 범위 내에서만 그리도록 제한
         if 0 <= event.x < self.canvas_width and 0 <= event.y < self.canvas_height:
             col = event.x // self.cell_size
@@ -323,6 +363,17 @@ class PixelArtVendingMachine:
             else:
                 self.grid_cells[row][col] = None
     
+    def handle_canvas_press(self, event):
+        """캔버스 클릭 시 종이 유무를 확인하고, 그리기/지우기를 실행합니다."""
+        if self.paper_count < 1:
+            messagebox.showwarning("종이 부족", "종이가 없어 그림을 그릴 수 없습니다.\n상점에서 종이를 추가해주세요.", parent=self.root)
+            return
+        
+        if event.num == 1: # 마우스 왼쪽 버튼
+            self.paint_cell(event)
+        elif event.num == 3: # 마우스 오른쪽 버튼
+            self.erase_cell(event)
+
     def select_color(self, new_color):
         self.current_color = new_color
 
@@ -338,6 +389,18 @@ class PixelArtVendingMachine:
                     self.canvas.delete(self.grid_cells[row][col])
                     self.grid_cells[row][col] = None
 
+    def redraw_canvas(self):
+        """grid_cells 데이터 기준으로 캔버스를 다시 그립니다."""
+        for row in range(self.grid_size):
+            for col in range(self.grid_size):
+                cell_id = self.grid_cells[row][col]
+                if cell_id:
+                    color = self.canvas.itemcget(cell_id, "fill")
+                    x1, y1 = col * self.cell_size, row * self.cell_size
+                    x2, y2 = x1 + self.cell_size, y1 + self.cell_size
+                    new_rect_id = self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="")
+                    self.grid_cells[row][col] = new_rect_id # 새 ID로 업데이트
+
     def register_art(self):
         # 종이가 있는지 확인
         if self.paper_count < 1:
@@ -349,11 +412,17 @@ class PixelArtVendingMachine:
         result = dialog.result
 
         if result:
-            price, quantity = result
+            price, quantity, filename = result
             try:
-                self.art_counter += 1
-                filename = f"art_{self.art_counter:02d}.png"
+                # 파일 이름에 .png 확장자가 없으면 추가
+                if not filename.lower().endswith('.png'):
+                    filename += '.png'
+
                 filepath = os.path.join(self.art_dir, filename)
+                if os.path.exists(filepath):
+                    if not messagebox.askyesno("파일 덮어쓰기", "같은 이름의 파일이 이미 존재합니다. 덮어쓰시겠습니까?", parent=self.root):
+                        return
+
                 image = Image.new("RGB", (self.canvas_width, self.canvas_height), "white")
                 draw = ImageDraw.Draw(image)
                 for row in range(self.grid_size):
@@ -382,7 +451,6 @@ class PixelArtVendingMachine:
         if num_to_add:
             self.paper_count += num_to_add
             self.paper_count_var.set(f"남은 종이: {self.paper_count}장")
-            self.no_paper_warning_shown = False # 종이가 추가되었으므로 경고 플래그 리셋
             messagebox.showinfo("완료", f"{num_to_add}장의 종이를 추가했습니다.", parent=self.root)
 
     def open_paint_shop(self):
@@ -405,6 +473,7 @@ class PixelArtVendingMachine:
         for widget in self.scrollable_gallery_frame.winfo_children():
             widget.destroy()
         self.gallery_images.clear()
+        self.gallery_buy_buttons = [] # 구입 버튼 목록 초기화
         for item in self.vending_machine_items:
             item_frame = tk.Frame(self.scrollable_gallery_frame, bd=1, relief="solid")
             item_frame.pack(pady=5, padx=10, fill="x")
@@ -417,20 +486,28 @@ class PixelArtVendingMachine:
             info_frame = tk.Frame(item_frame)
             info_frame.pack(side="left", padx=10)
             
+            filename = os.path.basename(item["filepath"])
+            filename_label = tk.Label(info_frame, text=filename, font=("Arial", 12, "bold"))
+            filename_label.pack(anchor="w")
+
             price_text = f"가격: {item['price']:,}원"
             stock_text = f"재고: {item['stock']}개"
-            price_label = tk.Label(info_frame, text=price_text, font=("Arial", 12))
+            price_label = tk.Label(info_frame, text=price_text, font=("Arial", 10))
             price_label.pack(anchor="w")
-            stock_label = tk.Label(info_frame, text=stock_text, font=("Arial", 10))
+            stock_label = tk.Label(info_frame, text=stock_text, font=("Arial", 9))
             stock_label.pack(anchor="w")
 
             buy_button = tk.Button(info_frame)
             buy_button.pack(anchor="w", pady=5)
+            self.gallery_buy_buttons.append(buy_button) # 버튼 목록에 추가
             
             if item['stock'] <= 0:
                 buy_button.config(text="품절", state="disabled")
             else:
                 buy_button.config(text="구입", command=lambda i=item, sl=stock_label, btn=buy_button: self.buy_art(i, sl, btn))
+            
+            if not self.is_business_open:
+                buy_button.config(state="disabled")
 
     def update_collection(self):
         """'내 컬렉션' 탭을 업데이트합니다."""
@@ -544,6 +621,77 @@ class PixelArtVendingMachine:
         filename = os.path.basename(drawn_item["filepath"])
         messagebox.showinfo("획득!", f"축하합니다! '{filename}' 그림을 획득했습니다!")
 
+    def stop_business(self):
+        """영업을 중지합니다."""
+        if not self.is_business_open:
+            return
+        self.is_business_open = False
+
+        # 상태 라벨 업데이트
+        self.status_var.set("현재 상태: 영업 중지")
+        self.status_label.config(fg="red")
+
+        # 캔버스 비활성화
+        self.canvas.unbind("<B1-Motion>")
+        self.canvas.unbind("<Button-1>")
+        self.canvas.unbind("<B3-Motion>")
+        self.canvas.unbind("<Button-3>")
+
+        # 캔버스 배경 회색으로 변경
+        self.canvas.config(bg="#f0f0f0") # 연한 회색
+        self.canvas.delete("all") # 기존 그림과 격자 모두 삭제
+
+        # '구입' 버튼 비활성화
+        for button in self.gallery_buy_buttons:
+            button.config(state="disabled")
+
+        # 주요 기능 버튼 비활성화
+        self.random_draw_button.config(state="disabled")
+        self.register_btn.config(state="disabled")
+
+        # 배경색 어둡게 변경
+        dark_bg = "#e0e0e0"
+        for widget in self.background_widgets:
+            try:
+                widget.config(bg=dark_bg)
+            except tk.TclError:
+                # 일부 위젯은 bg 속성이 없을 수 있음 (예: ttk.Notebook)
+                pass
+
+    def start_business(self):
+        """영업을 다시 시작합니다."""
+        if self.is_business_open:
+            return
+        self.is_business_open = True
+
+        # 상태 라벨 업데이트
+        self.status_var.set("현재 상태: 영업중")
+        self.status_label.config(fg="green")
+
+        # 캔버스 활성화 및 복원
+        self.canvas.config(bg="white")
+        self.draw_grid() # 격자 다시 그리기
+        self.redraw_canvas() # 저장된 그림 다시 그리기
+        self.canvas.bind("<B1-Motion>", self.paint_cell)
+        self.canvas.bind("<Button-1>", self.paint_cell)
+        self.canvas.bind("<B3-Motion>", self.erase_cell) # 이 줄은 handle_canvas_press와 중복될 수 있으나, 드래그를 위해 유지합니다.
+        self.canvas.bind("<ButtonPress-3>", self.handle_canvas_press)
+
+        # 주요 기능 버튼 활성화
+        self.random_draw_button.config(state="normal")
+        self.register_btn.config(state="normal")
+
+        # 갤러리 업데이트 (버튼 상태 복원)
+        self.update_gallery()
+
+        # 배경색 원래대로 복원
+        default_bg = "#f0f0f0" # Tkinter 기본 배경색
+        for widget in self.background_widgets:
+            try:
+                widget.config(bg=default_bg)
+            except tk.TclError:
+                pass
+        self.status_label.config(bg=default_bg) # 상태 라벨은 별도 처리
 
 if __name__ == "__main__":
     root = tk.Tk()
