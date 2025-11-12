@@ -159,6 +159,7 @@ class PixelArtVendingMachine:
         self.paper_count = 0
         self.paper_count_var = tk.StringVar()
         self.paper_count_var.set(f"남은 종이: {self.paper_count}장")
+        self.no_paper_warning_shown = False # 종이 부족 경고를 한 번만 표시하기 위한 플래그
 
         # --- 사용자 잔액 ---
         self.balance = 10000
@@ -301,6 +302,14 @@ class PixelArtVendingMachine:
         self.change_cell_color(event, "white")
 
     def change_cell_color(self, event, color):
+        # 종이가 없으면 그리기를 막습니다.
+        if self.paper_count < 1:
+            if not self.no_paper_warning_shown:
+                messagebox.showwarning("종이 부족", "종이가 없어 그림을 그릴 수 없습니다.\n상점에서 종이를 추가해주세요.", parent=self.root)
+                self.no_paper_warning_shown = True # 경고를 표시했음을 기록
+            return
+
+        # 캔버스 범위 내에서만 그리도록 제한
         if 0 <= event.x < self.canvas_width and 0 <= event.y < self.canvas_height:
             col = event.x // self.cell_size
             row = event.y // self.cell_size
@@ -318,6 +327,11 @@ class PixelArtVendingMachine:
         self.current_color = new_color
 
     def clear_canvas(self):
+        # 종이가 없으면 지우기를 막습니다.
+        if self.paper_count < 1:
+            messagebox.showwarning("종이 부족", "종이가 없어 캔버스를 지울 수 없습니다.", parent=self.root)
+            return
+
         for row in range(self.grid_size):
             for col in range(self.grid_size):
                 if self.grid_cells[row][col]:
@@ -325,6 +339,12 @@ class PixelArtVendingMachine:
                     self.grid_cells[row][col] = None
 
     def register_art(self):
+        # 종이가 있는지 확인
+        if self.paper_count < 1:
+            messagebox.showwarning("종이 부족", "남은 종이가 없습니다. 상점에서 종이를 추가하세요.", parent=self.root)
+            return
+
+        # 등록 다이얼로그 실행
         dialog = RegisterDialog(self.root)
         result = dialog.result
 
@@ -347,6 +367,11 @@ class PixelArtVendingMachine:
                 art_info = {"filepath": filepath, "price": price, "stock": quantity}
                 self.vending_machine_items.append(art_info)
                 messagebox.showinfo("등록 완료", f"'{filename}'으로 저장되었습니다.\n가격: {price}원, 수량: {quantity}개")
+
+                # 등록 성공 시 종이 1장 차감
+                self.paper_count -= 1
+                self.paper_count_var.set(f"남은 종이: {self.paper_count}장")
+
                 self.update_gallery()
             except Exception as e:
                 messagebox.showerror("오류", f"이미지 저장 중 오류가 발생했습니다:\n{e}")
@@ -357,6 +382,7 @@ class PixelArtVendingMachine:
         if num_to_add:
             self.paper_count += num_to_add
             self.paper_count_var.set(f"남은 종이: {self.paper_count}장")
+            self.no_paper_warning_shown = False # 종이가 추가되었으므로 경고 플래그 리셋
             messagebox.showinfo("완료", f"{num_to_add}장의 종이를 추가했습니다.", parent=self.root)
 
     def open_paint_shop(self):
