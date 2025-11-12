@@ -74,6 +74,8 @@ class PixelArtVendingMachine:
         self.root.title("픽셀 아트 판매 자판기")
         self.root.geometry("1000x700")
 
+        self.create_menubar() # 메뉴바 생성
+
         # --- 캔버스 설정 ---
         self.grid_size = 20
         self.cell_size = 25
@@ -105,6 +107,17 @@ class PixelArtVendingMachine:
         self.create_layout()
         self.update_gallery() # 초기 갤러리 로딩
         self.update_collection() # 초기 컬렉션 로딩
+
+    def create_menubar(self):
+        """애플리케이션의 메인 메뉴바를 생성합니다."""
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        # '영업' 메뉴 생성
+        business_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="영업", menu=business_menu)
+        business_menu.add_command(label="영업중")
+        business_menu.add_command(label="영업 중지")
 
     def create_layout(self):
         # 1. 왼쪽 프레임 (픽셀 아트 캔버스 영역)
