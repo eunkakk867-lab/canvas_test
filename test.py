@@ -94,6 +94,11 @@ class PixelArtVendingMachine:
         if not os.path.exists(self.art_dir):
             os.makedirs(self.art_dir)
         
+        # --- 재료 데이터 ---
+        self.paper_count = 0
+        self.paper_count_var = tk.StringVar()
+        self.paper_count_var.set(f"남은 종이: {self.paper_count}장")
+
         # --- 사용자 잔액 ---
         self.balance = 10000
         self.balance_var = tk.StringVar()
@@ -118,6 +123,12 @@ class PixelArtVendingMachine:
         menubar.add_cascade(label="영업", menu=business_menu)
         business_menu.add_command(label="영업중")
         business_menu.add_command(label="영업 중지")
+
+        # '상점' 메뉴 생성
+        shop_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="상점", menu=shop_menu)
+        shop_menu.add_command(label="종이 추가")
+        shop_menu.add_command(label="물감 구입")
 
     def create_layout(self):
         # 1. 왼쪽 프레임 (픽셀 아트 캔버스 영역)
@@ -151,6 +162,10 @@ class PixelArtVendingMachine:
         # '자판기에 등록하기' 버튼 추가
         register_btn = tk.Button(controls_frame, text="자판기에 등록하기", command=self.register_art)
         register_btn.pack(side="left", padx=5)
+
+        # 남은 종이 라벨 추가
+        paper_label = tk.Label(controls_frame, textvariable=self.paper_count_var, font=("Arial", 10))
+        paper_label.pack(side="left", padx=20)
 
         # 2. 오른쪽 프레임 (탭 인터페이스 영역)
         right_frame = tk.Frame(self.root, bd=2, relief="sunken")
