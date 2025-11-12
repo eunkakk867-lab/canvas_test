@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, simpledialog, messagebox
+from tkinter import ttk, simpledialog, messagebox, colorchooser
 from PIL import Image, ImageDraw, ImageTk
 import os
 import random
@@ -67,6 +67,67 @@ class RegisterDialog(tk.Toplevel):
         self.parent.focus_set()
         self.destroy()
 
+class PaintShopDialog(tk.Toplevel):
+    """새로운 물감(색상)을 구입하기 위한 커스텀 대화상자"""
+    def __init__(self, parent):
+        # parent는 이제 PixelArtVendingMachine 인스턴스입니다.
+        super().__init__(parent.root)
+        self.parent_app = parent
+        self.transient(parent.root)
+        self.title("물감 구입")
+
+        self.random_colors = self.generate_random_colors(3)
+        self.selected_color = tk.StringVar()
+        self.color_buttons = []
+
+        body = tk.Frame(self)
+        tk.Label(body, text="구입할 색상 하나를 선택하세요.").pack(pady=10)
+        
+        button_frame = tk.Frame(body)
+        button_frame.pack(pady=5)
+
+        for color in self.random_colors:
+            rb = tk.Radiobutton(
+                button_frame, 
+                text=color, 
+                variable=self.selected_color, 
+                value=color,
+                indicatoron=0, # 라디오 버튼의 원 모양을 숨깁니다.
+                width=10,
+                bg=color,
+                selectcolor=color, # 선택되었을 때 배경색
+                command=self.on_color_select
+            )
+            rb.pack(side="left", padx=5)
+
+        body.pack(padx=15, pady=15)
+
+        self.add_button = tk.Button(self, text="팔레트에 추가", command=self.add_color_to_palette, state="disabled")
+        self.add_button.pack(pady=10)
+
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self.cancel)
+        self.geometry(f"+{parent.root.winfo_rootx()+100}+{parent.root.winfo_rooty()+100}")
+        self.wait_window(self)
+
+    def generate_random_colors(self, count):
+        """지정된 개수만큼 랜덤 hex 색상 코드를 생성합니다."""
+        return [f"#{random.randint(0, 0xFFFFFF):06x}" for _ in range(count)]
+
+    def on_color_select(self):
+        """색상이 선택되면 '추가' 버튼을 활성화합니다."""
+        if self.selected_color.get():
+            self.add_button.config(state="normal")
+
+    def add_color_to_palette(self):
+        """선택된 색상을 메인 팔레트에 추가합니다."""
+        color = self.selected_color.get()
+        if color:
+            self.parent_app.add_new_colors([color])
+        self.destroy()
+
+    def cancel(self):
+        self.destroy()
 
 class PixelArtVendingMachine:
     def __init__(self, root):
@@ -127,8 +188,8 @@ class PixelArtVendingMachine:
         # '상점' 메뉴 생성
         shop_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="상점", menu=shop_menu)
-        shop_menu.add_command(label="종이 추가")
-        shop_menu.add_command(label="물감 구입")
+        shop_menu.add_command(label="종이 추가", command=self.add_paper)
+        shop_menu.add_command(label="물감 구입", command=self.open_paint_shop)
 
     def create_layout(self):
         # 1. 왼쪽 프레임 (픽셀 아트 캔버스 영역)
@@ -150,11 +211,12 @@ class PixelArtVendingMachine:
         # --- 컨트롤 프레임 (색상 팔레트, 버튼) ---
         controls_frame = tk.Frame(canvas_frame)
         controls_frame.pack(pady=10)
+        
+        self.palette_frame = tk.Frame(controls_frame) # 색상 버튼을 담을 프레임
+        self.palette_frame.pack(side="left")
 
-        colors = ["black", "red", "blue", "green"]
-        for color in colors:
-            color_btn = tk.Button(controls_frame, bg=color, width=4, command=lambda c=color: self.select_color(c))
-            color_btn.pack(side="left", padx=5)
+        initial_colors = ["black", "red", "blue", "green"]
+        self.add_new_colors(initial_colors) # 초기 색상 팔레트 생성
 
         clear_btn = tk.Button(controls_frame, text="모두 지우기", command=self.clear_canvas)
         clear_btn.pack(side="left", padx=20)
@@ -288,6 +350,30 @@ class PixelArtVendingMachine:
                 self.update_gallery()
             except Exception as e:
                 messagebox.showerror("오류", f"이미지 저장 중 오류가 발생했습니다:\n{e}")
+
+    def add_paper(self):
+        """'종이 추가' 메뉴를 통해 종이를 추가합니다."""
+        num_to_add = simpledialog.askinteger("종이 추가", "몇 장을 추가하시겠습니까?", parent=self.root, minvalue=1)
+        if num_to_add:
+            self.paper_count += num_to_add
+            self.paper_count_var.set(f"남은 종이: {self.paper_count}장")
+            messagebox.showinfo("완료", f"{num_to_add}장의 종이를 추가했습니다.", parent=self.root)
+
+    def open_paint_shop(self):
+        """'물감 구입' 팝업창을 엽니다."""
+        PaintShopDialog(self) # self(PixelArtVendingMachine 인스턴스)를 전달
+
+    def add_new_colors(self, colors):
+        """색상 팔레트에 새로운 색상 버튼들을 추가합니다."""
+        for color in colors:
+            if color: # None이 아닌 유효한 색상만 추가
+                color_btn = tk.Button(
+                    self.palette_frame, 
+                    bg=color, 
+                    width=4, 
+                    command=lambda c=color: self.select_color(c)
+                )
+                color_btn.pack(side="left", padx=2)
 
     def update_gallery(self):
         for widget in self.scrollable_gallery_frame.winfo_children():
